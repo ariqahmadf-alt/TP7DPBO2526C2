@@ -1,8 +1,10 @@
 # Cekrek.in Booking Manager
 
-Nama : Ariq Ahmad Fathir
-NIM : 2506752
-Kelas : C2
+| | |
+| --- | --- |
+| **Nama** | Ariq Ahmad Fathir |
+| **NIM** | 2506752 |
+| **Kelas** | C2 |
 
 ## Janji
 
