@@ -4,6 +4,12 @@ Nama : Ariq Ahmad Fathir
 NIM : 2506752
 Kelas : C2
 
+## Janji
+
+Saya Ariq Ahmad Fathir dengan NIM 2506752 mengerjakan TP 7 dalam mata kuliah
+Desain dan Pemrograman Berorientasi Objek untuk keberkahan-Nya, maka saya tidak melakukan
+kecurangan seperti yang telah dispesifikasikan. Aamiin.
+
 ## 1. Tentang Aplikasi
 
 Cekrek.in adalah layanan sewa photobooth portabel yang berbasis di Bandung. Booth dapat dibawa ke
@@ -345,6 +351,67 @@ Rincian langkahnya:
 | Status bayar diturunkan dari data pembayaran | `Payment::summarize()` |
 | Hapus data yang masih dipakai ditolak | `ensureDeletable()` pada tiap model |
 
+### Penanganan Error
+
+Aplikasi memisahkan error berdasarkan penyebabnya. Setiap jenis ditangani di tempat yang tepat dan hasilnya dikembalikan ke admin sebagai pesan yang jelas, tanpa pernah menampilkan error mentah dari PHP atau database.
+
+#### Cara error ditampilkan
+
+- **Pesan di bagian atas halaman.** Berwarna merah untuk error, hijau untuk sukses, dan biru untuk informasi. Pesan disimpan di session lewat class `Flash`, tampil satu kali, lalu hilang.
+- **Pesan di bawah kolom form.** Kesalahan validasi ditandai pada kolom yang bermasalah, dengan garis merah dan teks penjelasan.
+- **Input lama dipertahankan.** Ketika form ditolak, isian sebelumnya tetap terisi sehingga admin cukup memperbaiki bagian yang salah.
+- **Pola Post-Redirect-Get.** Setelah form dikirim, baik berhasil maupun gagal, server melakukan redirect. Memuat ulang halaman tidak mengirim form untuk kedua kalinya.
+
+#### Jenis error dan penanganannya
+
+| Jenis | Dilempar oleh | Ditangani | Hasil untuk admin |
+| --- | --- | --- | --- |
+| Input tidak valid | `ValidationException` | Controller | Form kembali dengan input lama dan pesan di bawah kolom |
+| Jadwal bentrok | `BookingConflictException` | Controller | Form kembali dengan pesan yang menyebut booking yang bentrok |
+| Data masih dipakai | `DeleteRestrictedException` | Controller | Penghapusan dibatalkan, daftar tampil dengan pesan penjelasan |
+| Kesalahan database | `PDOException` | Controller | Pesan umum, detail teknis hanya dicatat di log server |
+| Token CSRF tidak valid | `RuntimeException` | `index.php` | Request dibatalkan dan admin diarahkan kembali dengan pesan |
+| Data atau halaman tidak ada | Pengecekan di controller | Controller | Pesan "tidak ditemukan" dan redirect ke daftar |
+| Database tidak dapat dihubungi | `RuntimeException` | `index.php` | Halaman error sederhana dengan petunjuk memeriksa MySQL |
+| Kesalahan tak terduga | `Throwable` | `index.php` | Pesan umum, detail dicatat di log server |
+
+#### Contoh pesan yang tampil
+
+| Situasi | Pesan |
+| --- | --- |
+| Login salah | Username atau password salah. |
+| Email sudah terdaftar | Email sudah dipakai customer lain. |
+| Kode unit kembar | Kode unit sudah dipakai unit lain. |
+| Jam selesai lebih awal dari jam mulai | Jam selesai harus setelah jam mulai. |
+| Diskon melebihi subtotal | Diskon tidak boleh melebihi subtotal (Rp 1.000.000). |
+| Jadwal bentrok | Jadwal bentrok dengan booking #3 "Wisuda SMA Negeri Contoh 99" (14/11/2026, 08:00-10:00) pada unit BTH-001. |
+| Unit sedang perawatan | Unit "BTH-003" sedang dalam perawatan dan tidak dapat dipilih. |
+| Status Selesai belum lunas | Booking hanya dapat berstatus Selesai jika sudah lunas. Sisa tagihan: Rp 500.000. |
+| Pembayaran melebihi tagihan | Nominal melebihi sisa tagihan. Sisa tagihan saat ini: Rp 1.450.000. |
+| Pelunasan tidak menutup sisa | Pelunasan harus menutup seluruh sisa tagihan (Rp 1.450.000). Gunakan tipe DP untuk pembayaran sebagian. |
+| Hapus customer yang punya booking | Customer "Rina Maharani" tidak dapat dihapus karena masih memiliki 2 booking. Hapus booking terkait terlebih dahulu. |
+| Hapus booking yang sudah dibayar | Booking ini sudah memiliki 2 pembayaran sehingga tidak dapat dihapus. Ubah statusnya menjadi Dibatalkan agar riwayat pembayaran tetap tersimpan. |
+| Token CSRF salah | Token keamanan tidak valid atau kedaluwarsa. Silakan muat ulang halaman. |
+
+#### Kegagalan di tengah proses (rollback)
+
+Pembuatan dan perubahan booking terdiri dari beberapa langkah: menyimpan booking, menyimpan frame yang dipilih, dan mencatat DP awal. Semuanya berjalan dalam satu transaksi database:
+
+1. `beginTransaction()` dipanggil sebelum langkah pertama.
+2. Bila semua langkah berhasil, `commit()` menyimpan seluruh perubahan.
+3. Bila salah satu langkah gagal, termasuk validasi DP yang baru diperiksa di akhir, `rollBack()` membatalkan semuanya lalu error diteruskan ke controller.
+
+Akibatnya tidak ada kondisi setengah tersimpan, misalnya booking tanpa frame atau pembayaran tanpa booking. Sebagai contoh, booking dengan DP awal yang melebihi total tagihan ditolak sepenuhnya, dan booking tersebut tidak muncul di daftar.
+
+Untuk mencegah dua permintaan yang berjalan bersamaan sama-sama lolos pengecekan, unit booth dan baris booking dikunci dengan `SELECT ... FOR UPDATE` selama transaksi berlangsung.
+
+#### Prinsip yang dipakai
+
+- **Validasi di server.** Atribut seperti `required` dan `min` di HTML hanya membantu pengguna. Semua aturan diperiksa ulang di server dan tidak bergantung pada browser.
+- **Pesan untuk pengguna, detail untuk log.** Kesalahan database dan kesalahan tak terduga dicatat lewat `error_log()`, sedangkan layar hanya menampilkan pesan umum. Dengan begitu nama tabel, query, dan kredensial tidak pernah terlihat di browser.
+- **Foreign key sebagai lapis kedua.** Pengecekan hapus di aplikasi mencegah error sebelum terjadi, sedangkan `ON DELETE RESTRICT` di database menjadi jaring pengaman. Bila foreign key tetap menolak, pesannya diterjemahkan menjadi pesan yang ramah.
+- **Semua aksi pengubah data memakai POST dan token CSRF.** Permintaan tanpa token yang cocok ditolak sebelum menyentuh model.
+
 ## 6. Penerapan OOP
 
 **Abstract class dan inheritance (`BaseModel`).** Semua model memerlukan koneksi, nama tabel, dan
@@ -423,21 +490,67 @@ disertakan. Bila filenya dimiliki, taruh di `assets/fonts` lalu ikuti petunjuk d
 
 Screen record penggunaan aplikasi diletakkan di folder `Dokumentasi`.
 
-> **Tempat video**
-> Ganti baris di bawah dengan tautan atau embed video setelah direkam.
->
-> Video lengkap: `Dokumentasi/demo.mp4` _(belum diisi)_
+- Login dan logout, serta dashboard
 
-Rekaman memperlihatkan:
+      
 
-- [ ] Login dan logout, serta dashboard
-- [ ] Customer: tambah, ubah, hapus
-- [ ] Paket: tambah, ubah, hapus
-- [ ] Frame: tambah, ubah, hapus
-- [ ] Unit booth: tambah, ubah, hapus
-- [ ] Booking: tambah, ubah, hapus, serta pencarian dan filter
-- [ ] Pembayaran: catat DP, catat pelunasan, ubah, hapus
-- [ ] Skenario bentrok jadwal: membuat booking pada unit, tanggal, dan jam yang beririsan, lalu
-      aplikasi menolak dengan pesan booking mana yang bentrok
-- [ ] Penolakan hapus data yang masih dipakai: menghapus customer, paket, frame, atau unit yang masih
-      punya booking, serta menghapus booking yang sudah punya pembayaran
+https://github.com/user-attachments/assets/16d5b5d9-ad27-4b75-af80-bffa6516c0ff
+
+
+- Customer: tambah, ubah, hapus
+
+
+
+https://github.com/user-attachments/assets/dcc25fe7-236a-46cd-a185-a799a88763cf
+
+
+
+- Paket: tambah, ubah, hapus
+
+
+
+https://github.com/user-attachments/assets/d9146fba-6fc9-4a2d-9dec-96ee9f8e56f2
+
+
+
+- Frame: tambah, ubah, hapus
+
+
+
+https://github.com/user-attachments/assets/1797dfcc-41c1-4507-90f8-471ce2270aff
+
+
+  
+- Unit booth: tambah, ubah, hapus
+
+
+
+https://github.com/user-attachments/assets/7c2138e6-c478-4101-a457-04a3a73e4196
+
+
+
+- Booking: tambah, ubah, hapus, serta pencarian dan filter
+
+
+
+https://github.com/user-attachments/assets/3e015933-c275-471e-b163-58ce84e7c96b
+
+
+
+- Pembayaran: catat DP, catat pelunasan, ubah, hapus
+
+
+
+https://github.com/user-attachments/assets/7dc6410a-9043-40c0-abe3-9723354f502b
+
+
+
+- Error handling (salah input, bentrok jadwal, penghapusan data yang masih dipakai, dll)
+
+
+
+https://github.com/user-attachments/assets/34984d20-cf90-44cc-abf0-079c108b458c
+
+
+
+
